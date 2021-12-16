@@ -1,95 +1,64 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
+# https://github.com/hogeline/sample_fastapi
 
-from pydantic import BaseModel
+from fastapi import FastAPI
+from typing import List
+from starlette.middleware.cors import CORSMiddleware
 
-import requests
+from db import session
+from model import UserTable, User
 
 app = FastAPI()
 
-db = []
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
-class City(BaseModel):
-    name: str
-    timezone: str
+# ----------API 정의------------
+@app.get("/users")
+def read_users():
+    users = session.query(UserTable).all()
+    return users
 
 
-templates = Jinja2Templates(directory="templates")
+@app.get("/users/{user_id}")
+def read_user(user_id: int):
+    user = session.query(UserTable).filter(UserTable.id == user_id).first()
+    return user
 
 
-# ------------------------------------------------------------------------------------
-# Models
-# ------------------------------------------------------------------------------------
+@app.post("/user")
+# /user?name="이름"&age=10
+async def create_user(name: str, age: int):
+    user = UserTable()
+    user.name = name
+    user.age = age
 
-class City(BaseModel):
-    name: str
-    timezone: str
+    session.add(user)
+    session.commit()
 
-
-class CityModify(BaseModel):
-    id: int
-    name: str
-    timezone: str
+    return f"{name} created..."
 
 
-@app.get("/")
-async def root():
-    return {"message": "Hello World"}
+@app.put("/users")
+# users=[{"id": 1, "name": "이름1", "age": 16},{"id": 2, "name": "이름2", "age": 20}]
+async def update_users(users: List[User]):
+    for i in users:
+        user = session.query(UserTable).filter(UserTable.id == i.id).first()
+        user.name = i.name
+        user.age = i.age
+        session.commit()
+
+    return f"{users[0].name} updated..."
 
 
-@app.get('/cities', response_class=HTMLResponse)
-def get_cities(request: Request):
-    context = {}
+@app.delete("/user")
+async def delete_users(userid: int):
+    user = session.query(UserTable).filter(UserTable.id == userid).delete()
+    session.commit()
 
-    rs_city = []
-
-    cnt = 0
-    for city in db:
-        string = f"http://worldtimeapi.org/api/timezone/{city['timezone']}"
-        r = requests.get(string)
-        cur_time = r.json()['datetime']
-
-        cnt += 1
-
-        rs_city.append({'id': cnt, 'name': city['name'], 'timezone': city['timezone'], 'current_time': cur_time})
-
-    # print(rs_city)
-
-    context['request'] = request
-    context['rs_city'] = rs_city
-
-    return templates.TemplateResponse("city_list.html", context)
-
-
-@app.get('/cities/{city_id}', response_class=HTMLResponse)
-def get_city(request: Request, city_id: int):
-    city = db[city_id - 1]
-    r = requests.get(f"http://worldtimeapi.org/api/timezone/{city['timezone']}")
-    cur_time = r.json()['datetime']
-
-    # return {'name':city['name'], 'timezone':city['timezone'], 'current_time': cur_time}
-    context = {'request': request, 'name': city['name'], 'timezone': city['timezone'], 'current_time': cur_time}
-    return templates.TemplateResponse("city_detail.html", context)
-
-
-@app.post('/cities')
-def create_city(city: City):
-    db.append(city.dict())
-
-    return db[-1]
-
-
-@app.put('/cities')
-def modify_city(city: CityModify):
-    db[city.id - 1] = {'name': city.name, 'timezone': city.timezone}
-
-    return db[city.id - 1]
-
-
-@app.delete('/cities/{city_id}')
-def delete_city(city_id: int):
-    db.pop(city_id - 1)
-
-    return {'result_msg': 'Deleted...'}
+    return f"User deleted..."
